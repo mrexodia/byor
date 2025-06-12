@@ -3,26 +3,26 @@
 import argparse
 import os
 from pathlib import Path
-from cryptography.hazmat.primitives import serialization, hashes
-from cryptography.hazmat.primitives.asymmetric import ec
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.asymmetric import x25519
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 from cryptography.fernet import Fernet
 import base64
 
 def load_operator_public_key(key_path):
-    """Load operator's public key from file"""
-    with open(key_path, 'rb') as f:
-        return serialization.load_pem_public_key(f.read())
+    """Load operator's public key from raw bytes"""
+    key_bytes = Path(key_path).read_bytes()
+    return x25519.X25519PublicKey.from_public_bytes(key_bytes)
 
 def generate_file_key_pair():
-    """Generate a new ECDSA key pair for a file"""
-    private_key = ec.generate_private_key(ec.SECP384R1())
+    """Generate a new X25519 key pair for a file"""
+    private_key = x25519.X25519PrivateKey.generate()
     public_key = private_key.public_key()
     return private_key, public_key
 
 def compute_shared_secret(private_key, peer_public_key):
-    """Compute ECDH shared secret and derive encryption key"""
-    shared_secret = private_key.exchange(ec.ECDH(), peer_public_key)
+    """Compute X25519 shared secret and derive encryption key"""
+    shared_secret = private_key.exchange(peer_public_key)
     
     # Derive encryption key using HKDF
     derived_key = HKDF(
@@ -35,15 +35,8 @@ def compute_shared_secret(private_key, peer_public_key):
     # Convert to Fernet key (32 bytes base64-encoded)
     return base64.urlsafe_b64encode(derived_key)
 
-def serialize_public_key(public_key):
-    """Serialize public key to bytes"""
-    return public_key.public_bytes(
-        encoding=serialization.Encoding.PEM,
-        format=serialization.PublicFormat.SubjectPublicKeyInfo
-    )
-
-def encrypt_file(file_path, encryption_key, output_path, file_public_key):
-    """Encrypt file and append public key"""
+def encrypt_file(file_path, encryption_key, output_path, file_public_key_bytes):
+    """Encrypt file and append public key bytes"""
     fernet = Fernet(encryption_key)
     
     # Read and encrypt file content
@@ -51,12 +44,10 @@ def encrypt_file(file_path, encryption_key, output_path, file_public_key):
         file_data = f.read()
     encrypted_data = fernet.encrypt(file_data)
     
-    # Write encrypted data and append public key
+    # Write encrypted data and append public key bytes
     with open(output_path, 'wb') as f:
         f.write(encrypted_data)
-        f.write(b'\n===BEGIN FILE PUBLIC KEY===\n')
-        f.write(file_public_key)
-        f.write(b'\n===END FILE PUBLIC KEY===\n')
+        f.write(file_public_key_bytes)
 
 def process_file(file_path, operator_public_key, upload=False, delete=False):
     """Process a single file: encrypt and handle upload/delete options"""
@@ -70,12 +61,15 @@ def process_file(file_path, operator_public_key, upload=False, delete=False):
         # Prepare output path
         output_path = Path(f"{file_path}.enc")
         
+        # Get public key as raw bytes
+        file_public_key_bytes = file_public_key.public_bytes_raw()
+        
         # Encrypt file and append public key
         encrypt_file(
             file_path, 
             encryption_key,
             output_path,
-            serialize_public_key(file_public_key)
+            file_public_key_bytes
         )
         
         print(f"Successfully encrypted: {file_path}")
