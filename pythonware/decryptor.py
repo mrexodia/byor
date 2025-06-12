@@ -5,11 +5,11 @@ from pathlib import Path
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import x25519
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
-from cryptography.fernet import Fernet
-import base64
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
-# X25519 public key is 32 bytes
-PUBLIC_KEY_SIZE = 32
+# Constants for file format
+NONCE_SIZE = 12  # AES-GCM nonce size
+PUBLIC_KEY_SIZE = 32  # X25519 public key size
 
 def load_operator_private_key(key_path):
     """Load operator's private key from raw bytes"""
@@ -25,13 +25,19 @@ def extract_public_key(encrypted_file):
         
     return x25519.X25519PublicKey.from_public_bytes(public_key_bytes)
 
-def get_encrypted_content(encrypted_file):
-    """Get only the encrypted content from file (excluding the public key)"""
+def get_encrypted_parts(encrypted_file):
+    """Get nonce and encrypted content from file"""
     with open(encrypted_file, 'rb') as f:
         content = f.read()
     
-    # Return content without the last 32 bytes (public key)
-    return content[:-PUBLIC_KEY_SIZE]
+    # Extract parts:
+    # - First 12 bytes: nonce
+    # - Middle part: encrypted data
+    # - Last 32 bytes: public key
+    nonce = content[:NONCE_SIZE]
+    encrypted_data = content[NONCE_SIZE:-PUBLIC_KEY_SIZE]
+    
+    return nonce, encrypted_data
 
 def compute_shared_secret(private_key, peer_public_key):
     """Compute X25519 shared secret and derive encryption key"""
@@ -40,13 +46,12 @@ def compute_shared_secret(private_key, peer_public_key):
     # Derive encryption key using HKDF
     derived_key = HKDF(
         algorithm=hashes.SHA256(),
-        length=32,
+        length=32,  # 32 bytes for AES-256
         salt=None,
         info=b'file-encryption',
     ).derive(shared_secret)
     
-    # Convert to Fernet key (32 bytes base64-encoded)
-    return base64.urlsafe_b64encode(derived_key)
+    return derived_key
 
 def decrypt_file(encrypted_file, operator_private_key):
     """Decrypt a file using operator's private key"""
@@ -57,16 +62,16 @@ def decrypt_file(encrypted_file, operator_private_key):
         # Compute shared secret
         encryption_key = compute_shared_secret(operator_private_key, file_public_key)
         
-        # Get encrypted content
-        encrypted_content = get_encrypted_content(encrypted_file)
+        # Get encrypted parts
+        nonce, encrypted_data = get_encrypted_parts(encrypted_file)
         
-        # Decrypt content
-        fernet = Fernet(encryption_key)
-        decrypted_content = fernet.decrypt(encrypted_content)
+        # Create AES-GCM cipher and decrypt
+        aesgcm = AESGCM(encryption_key)
+        decrypted_data = aesgcm.decrypt(nonce, encrypted_data, None)
         
         # Save decrypted content
         output_path = Path(str(encrypted_file)[:-4] + '.dec')  # replace .enc with .dec
-        output_path.write_bytes(decrypted_content)
+        output_path.write_bytes(decrypted_data)
         
         print(f"Successfully decrypted: {encrypted_file}")
         return True

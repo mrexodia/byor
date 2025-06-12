@@ -1,7 +1,7 @@
 # File Encryption Tool Architecture
 
 ## Overview
-This tool provides a secure file encryption system using X25519 (Curve25519) for key exchange and shared secret computation. The system is designed for research purposes and implements a unique approach where each file gets its own encryption key pair.
+This tool provides a secure file encryption system using X25519 (Curve25519) for key exchange and AES-256-GCM for authenticated encryption. The system is designed for research purposes and implements a unique approach where each file gets its own encryption key pair.
 
 ## Components
 
@@ -22,8 +22,8 @@ graph TD
 For each file being encrypted:
 - Generates unique X25519 key pair
 - Computes shared secret using file's private key and operator's public key
-- Encrypts file content using derived key
-- Appends file's public key (32 bytes) to encrypted file
+- Encrypts file content using AES-256-GCM
+- Prepends random nonce and appends file's public key
 - Optionally uploads or deletes original file
 
 ```mermaid
@@ -33,21 +33,23 @@ graph TD
     C --> D[For each file]
     D --> E[Generate file-specific X25519 key pair]
     E --> F[Compute shared secret]
-    F --> G[Derive encryption key<br/>using HKDF]
-    G --> H[Encrypt with Fernet]
-    H --> I[Append public key<br/>32 bytes]
-    I --> J{Upload option enabled?}
-    J -->|Yes| K[Upload encrypted file]
-    J -->|No| L{Delete option enabled?}
-    L -->|Yes| M[Delete original file]
-    L -->|No| N[Keep original file]
+    F --> G[Derive AES key<br/>using HKDF]
+    G --> H[Generate random nonce]
+    H --> I[Encrypt with AES-GCM]
+    I --> J[Write nonce + encrypted data + public key]
+    J --> K{Upload option enabled?}
+    K -->|Yes| L[Upload encrypted file]
+    K -->|No| M{Delete option enabled?}
+    M -->|Yes| N[Delete original file]
+    M -->|No| O[Keep original file]
 ```
 
 ### 3. File Decryption Process
 For each encrypted file:
 - Extracts the file's public key (last 32 bytes)
+- Reads nonce (first 12 bytes)
 - Computes shared secret using operator's private key and file's public key
-- Decrypts file content using derived key
+- Decrypts file content using AES-256-GCM
 - Saves decrypted file with .dec extension
 
 ```mermaid
@@ -56,10 +58,11 @@ graph TD
     B --> C[Scan Directory]
     C --> D[For each .enc file]
     D --> E[Extract file's public key<br/>last 32 bytes]
-    E --> F[Compute shared secret]
-    F --> G[Derive encryption key<br/>using HKDF]
-    G --> H[Decrypt with Fernet]
-    H --> I[Save .dec file]
+    E --> F[Read nonce<br/>first 12 bytes]
+    F --> G[Compute shared secret]
+    G --> H[Derive AES key<br/>using HKDF]
+    H --> I[Decrypt with AES-GCM]
+    I --> J[Save .dec file]
 ```
 
 ### 4. Integrity Testing
@@ -89,17 +92,17 @@ graph TD
    - 32-byte public keys are stored with encrypted files
    - Operator keys are stored as raw bytes for efficiency
 
-2. **Shared Secret Computation**
-   - Uses X25519 (Curve25519) for secure key exchange
-   - HKDF for deriving encryption keys from shared secrets
-   - Different shared secret for each file
-   - Operator's private key required for decryption
+2. **Encryption**
+   - AES-256-GCM for authenticated encryption
+   - Unique random 12-byte nonce per file
+   - HKDF for secure key derivation from shared secrets
+   - Built-in authentication and integrity checks
 
 3. **File Security**
    - Optional secure deletion of original files
-   - Encrypted files contain only ciphertext and 32-byte public key
+   - Raw binary format without base64 encoding
    - No metadata or file information leaked
-   - Fernet provides secure symmetric encryption
+   - Encrypted file size = 12 + original_size + 32 bytes
 
 ## Implementation Notes
 
@@ -109,10 +112,11 @@ graph TD
    - Optional flags for upload/delete operations
 
 2. **File Format**
-   - Encrypted file structure: [encrypted_content][32_byte_public_key]
-   - Fixed-size public key (32 bytes) simplifies extraction
-   - No markers or separators needed
-   - Efficient binary format
+   Format: [nonce][encrypted_content][public_key]
+   - [nonce]: 12 bytes
+   - [encrypted_content]: variable length
+   - [public_key]: 32 bytes
+   Total overhead: 44 bytes per file
 
 3. **Testing**
    - Integrity verification through SHA256

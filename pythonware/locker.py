@@ -6,8 +6,7 @@ from pathlib import Path
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import x25519
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
-from cryptography.fernet import Fernet
-import base64
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
 def load_operator_public_key(key_path):
     """Load operator's public key from raw bytes"""
@@ -27,27 +26,31 @@ def compute_shared_secret(private_key, peer_public_key):
     # Derive encryption key using HKDF
     derived_key = HKDF(
         algorithm=hashes.SHA256(),
-        length=32,
+        length=32,  # 32 bytes for AES-256
         salt=None,
         info=b'file-encryption',
     ).derive(shared_secret)
     
-    # Convert to Fernet key (32 bytes base64-encoded)
-    return base64.urlsafe_b64encode(derived_key)
+    return derived_key
 
-def encrypt_file(file_path, encryption_key, output_path, file_public_key_bytes):
-    """Encrypt file and append public key bytes"""
-    fernet = Fernet(encryption_key)
+def encrypt_file(file_path, key, output_path, file_public_key_bytes):
+    """Encrypt file using AES-256-GCM and append public key bytes"""
+    # Create AES-GCM cipher
+    aesgcm = AESGCM(key)
+    
+    # Generate random 12-byte nonce
+    nonce = os.urandom(12)
     
     # Read and encrypt file content
     with open(file_path, 'rb') as f:
         file_data = f.read()
-    encrypted_data = fernet.encrypt(file_data)
+    encrypted_data = aesgcm.encrypt(nonce, file_data, None)
     
-    # Write encrypted data and append public key bytes
+    # Write nonce, encrypted data, and public key bytes
     with open(output_path, 'wb') as f:
-        f.write(encrypted_data)
-        f.write(file_public_key_bytes)
+        f.write(nonce)  # 12 bytes
+        f.write(encrypted_data)  # variable length
+        f.write(file_public_key_bytes)  # 32 bytes
 
 def process_file(file_path, operator_public_key, upload=False, delete=False):
     """Process a single file: encrypt and handle upload/delete options"""
@@ -115,7 +118,8 @@ def main():
     files_succeeded = 0
     
     for file_path in directory.iterdir():
-        if file_path.is_file() and not file_path.name.endswith('.enc'):
+        if (file_path.is_file() and 
+            not file_path.name.endswith(('.enc', '.dec'))):
             files_processed += 1
             if process_file(
                 file_path, 
