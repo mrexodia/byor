@@ -2,7 +2,7 @@
 
 Slides:
 
-[Part 1](./slides/part1.pdf)
+[Part 1](./slides/BYOR.pdf)
 
 ## Exercises
 
