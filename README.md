@@ -1,3 +1,7 @@
+# Vibe Coded implementation in Python
+
+See the `pythonware` folder for the Roo Code history. The cost was 0.94 USD for a working encryptor/decryptor using an ECDSA shared secret per file.
+
 # Build-Your-Own-Ransomware: Hands-On Offensive and Defensive Insights
 
 Slides:
