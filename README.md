@@ -1,5 +1,9 @@
 # Build-Your-Own-Ransomware: Hands-On Offensive and Defensive Insights
 
+Slides:
+
+[Part 1](./slides/part1.pdf)
+
 ## Exercises
 
 ### Time to Write Your Own Ransomware
