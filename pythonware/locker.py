@@ -1,9 +1,142 @@
-# Use argparse to parse command line arguments (operator_public, test_directory, --upload-files, --delete-files)
-# For every file in test_directory (that does not end with .enc):
-# - generate an ecdsa keypair
-# - compute a shared secret with the (file_private, operator_public) pair
-# - discard the private key from memory
-# - encrypt the file with the shared secret as {filename}.enc
-# - append the file_public to the end of the encrypted file
-# - optional: send the encrypted file to the operator
-# - optional: delete the original file
+#!/usr/bin/env python3
+
+import argparse
+import os
+from pathlib import Path
+from cryptography.hazmat.primitives import serialization, hashes
+from cryptography.hazmat.primitives.asymmetric import ec
+from cryptography.hazmat.primitives.kdf.hkdf import HKDF
+from cryptography.fernet import Fernet
+import base64
+
+def load_operator_public_key(key_path):
+    """Load operator's public key from file"""
+    with open(key_path, 'rb') as f:
+        return serialization.load_pem_public_key(f.read())
+
+def generate_file_key_pair():
+    """Generate a new ECDSA key pair for a file"""
+    private_key = ec.generate_private_key(ec.SECP384R1())
+    public_key = private_key.public_key()
+    return private_key, public_key
+
+def compute_shared_secret(private_key, peer_public_key):
+    """Compute ECDH shared secret and derive encryption key"""
+    shared_secret = private_key.exchange(ec.ECDH(), peer_public_key)
+    
+    # Derive encryption key using HKDF
+    derived_key = HKDF(
+        algorithm=hashes.SHA256(),
+        length=32,
+        salt=None,
+        info=b'file-encryption',
+    ).derive(shared_secret)
+    
+    # Convert to Fernet key (32 bytes base64-encoded)
+    return base64.urlsafe_b64encode(derived_key)
+
+def serialize_public_key(public_key):
+    """Serialize public key to bytes"""
+    return public_key.public_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PublicFormat.SubjectPublicKeyInfo
+    )
+
+def encrypt_file(file_path, encryption_key, output_path, file_public_key):
+    """Encrypt file and append public key"""
+    fernet = Fernet(encryption_key)
+    
+    # Read and encrypt file content
+    with open(file_path, 'rb') as f:
+        file_data = f.read()
+    encrypted_data = fernet.encrypt(file_data)
+    
+    # Write encrypted data and append public key
+    with open(output_path, 'wb') as f:
+        f.write(encrypted_data)
+        f.write(b'\n===BEGIN FILE PUBLIC KEY===\n')
+        f.write(file_public_key)
+        f.write(b'\n===END FILE PUBLIC KEY===\n')
+
+def process_file(file_path, operator_public_key, upload=False, delete=False):
+    """Process a single file: encrypt and handle upload/delete options"""
+    try:
+        # Generate unique key pair for this file
+        file_private_key, file_public_key = generate_file_key_pair()
+        
+        # Compute shared secret and derive encryption key
+        encryption_key = compute_shared_secret(file_private_key, operator_public_key)
+        
+        # Prepare output path
+        output_path = Path(f"{file_path}.enc")
+        
+        # Encrypt file and append public key
+        encrypt_file(
+            file_path, 
+            encryption_key,
+            output_path,
+            serialize_public_key(file_public_key)
+        )
+        
+        print(f"Successfully encrypted: {file_path}")
+        
+        if upload:
+            # TODO: Implement file upload functionality
+            print(f"Upload functionality not implemented yet")
+            
+        if delete and os.path.exists(file_path):
+            os.remove(file_path)
+            print(f"Deleted original file: {file_path}")
+            
+        return True
+        
+    except Exception as e:
+        print(f"Error processing {file_path}: {str(e)}")
+        return False
+
+def main():
+    parser = argparse.ArgumentParser(description='File encryption tool')
+    parser.add_argument('operator_public', help='Path to operator public key')
+    parser.add_argument('test_directory', help='Directory containing files to encrypt')
+    parser.add_argument('--upload-files', action='store_true',
+                      help='Upload encrypted files (not implemented)')
+    parser.add_argument('--delete-files', action='store_true',
+                      help='Delete original files after encryption')
+    args = parser.parse_args()
+    
+    # Load operator's public key
+    try:
+        operator_public_key = load_operator_public_key(args.operator_public)
+    except Exception as e:
+        print(f"Error loading operator public key: {str(e)}")
+        return 1
+    
+    # Process all files in directory
+    directory = Path(args.test_directory)
+    if not directory.is_dir():
+        print(f"Error: {directory} is not a directory")
+        return 1
+    
+    files_processed = 0
+    files_succeeded = 0
+    
+    for file_path in directory.iterdir():
+        if file_path.is_file() and not file_path.name.endswith('.enc'):
+            files_processed += 1
+            if process_file(
+                file_path, 
+                operator_public_key,
+                args.upload_files,
+                args.delete_files
+            ):
+                files_succeeded += 1
+    
+    print(f"\nEncryption complete!")
+    print(f"Files processed: {files_processed}")
+    print(f"Successfully encrypted: {files_succeeded}")
+    print(f"Failed: {files_processed - files_succeeded}")
+    
+    return 0 if files_processed == files_succeeded else 1
+
+if __name__ == '__main__':
+    exit(main())
