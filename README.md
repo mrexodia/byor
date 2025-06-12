@@ -21,7 +21,19 @@ Slides:
 
 ### Applying Evasion
 
+- Review the references and slides
+  - Apply the techniques to your ransomware
+
+Examples:
+
+- Different encryption strategies
+- File System Enumeration (not DFS/BFS)
+
 ## References
+
+[ransom-osx](./ransom-osx/locker/main.go)
+
+- macOS (Go)
 
 [BYOR Demo](./byor/README.md)
 
@@ -47,3 +59,5 @@ Slides:
 [RansomFS - Ransomware Detection](https://github.com/rad9800/RansomFS)
 
 - Detecting Ransomware using the Projected File System
+
+[BootExecute Ransomware](./bootexecute/README.md)
