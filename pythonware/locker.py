@@ -1,5 +1,5 @@
 # Use argparse to parse command line arguments (operator_public, test_directory, --upload-files, --delete-files)
-# For every file in test_directory:
+# For every file in test_directory (that does not end with .enc):
 # - generate an ecdsa keypair
 # - compute a shared secret with the (file_private, operator_public) pair
 # - discard the private key from memory
